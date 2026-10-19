@@ -301,7 +301,8 @@ namespace TopSolidMcpServer.Tools
                 "TopSolidHost.Elements.SetName(paramId, paramName);\n" +
                 "__message = \"OK: formula parameter '\" + paramName + \"' created (\" + unit + \", formula='\" + formula + \"')\";") },
 
-            { "creer_esquisse_rectangle", RW("GEOMETRY", "Creates a 2D rectangular sketch in the active document. Param: value=width:height (mm)",
+
+            { "creer_esquisse_rectangle", RW("GEOMETRY", "Creates a 2D rectangular sketch in the active PART document (3D document, sketch created with CreateSketchIn3D on the absolute OXY plane). Param: value=width:height (mm). The sketch is named Esquisse_Rectangle, Esquisse_Rectangle_2, ... (first free name).",
                 "string[] parts = \"{value}\".Split(':');\n" +
                 "if (parts.Length < 2) { __message = \"ERROR: expected format width:height (mm)\"; return; }\n" +
                 "double widthMm, heightMm;\n" +
@@ -310,14 +311,25 @@ namespace TopSolidMcpServer.Tools
                 "    { __message = \"ERROR: invalid numeric values\"; return; }\n" +
                 "double w = widthMm * 0.001;\n" +
                 "double h = heightMm * 0.001;\n" +
-                "// docId is refreshed by the wrapper (EnsureIsDirty)\n" +
-                "ElementId sketchId = TopSolidHost.Sketches2D.CreateSketchIn2D(docId, new SmartPoint2D(Point2D.O), new SmartDirection2D(Direction2D.DX), false);\n" +
-                "TopSolidHost.Elements.SetName(sketchId, \"Esquisse_Rectangle\");\n" +
+                "// docId is refreshed by the wrapper (EnsureIsDirty); the active document must be a part (3D document)\n" +
+                "ElementId sketchId = TopSolidHost.Sketches2D.CreateSketchIn3D(docId, new SmartPlane3D(Plane3D.OXY, -1000.0, 1000.0, -1000.0, 1000.0), SmartPoint3D.P0, true, SmartDirection3D.DX);\n" +
+                "// Element names must be unique in the document: pick the first free Esquisse_Rectangle[_n]\n" +
+                "var existingNames = new List<string>();\n" +
+                "foreach (var s in TopSolidHost.Sketches2D.GetSketches(docId))\n" +
+                "    existingNames.Add(TopSolidHost.Elements.GetName(s));\n" +
+                "string sketchName = \"Esquisse_Rectangle\";\n" +
+                "int nameIndex = 2;\n" +
+                "while (existingNames.Any(n => string.Equals(n, sketchName, StringComparison.OrdinalIgnoreCase)))\n" +
+                "{\n" +
+                "    sketchName = \"Esquisse_Rectangle_\" + nameIndex;\n" +
+                "    nameIndex++;\n" +
+                "}\n" +
+                "TopSolidHost.Elements.SetName(sketchId, sketchName);\n" +
                 "TopSolidHost.Sketches2D.StartModification(sketchId);\n" +
-                "ElementItemId pt1 = TopSolidHost.Sketches2D.CreatePoint(new Point2D(0, 0));\n" +
-                "ElementItemId pt2 = TopSolidHost.Sketches2D.CreatePoint(new Point2D(w, 0));\n" +
-                "ElementItemId pt3 = TopSolidHost.Sketches2D.CreatePoint(new Point2D(w, h));\n" +
-                "ElementItemId pt4 = TopSolidHost.Sketches2D.CreatePoint(new Point2D(0, h));\n" +
+                "ElementItemId pt1 = TopSolidHost.Sketches2D.CreateVertex(new Point2D(0, 0));\n" +
+                "ElementItemId pt2 = TopSolidHost.Sketches2D.CreateVertex(new Point2D(w, 0));\n" +
+                "ElementItemId pt3 = TopSolidHost.Sketches2D.CreateVertex(new Point2D(w, h));\n" +
+                "ElementItemId pt4 = TopSolidHost.Sketches2D.CreateVertex(new Point2D(0, h));\n" +
                 "var segs = new List<ElementItemId>();\n" +
                 "segs.Add(TopSolidHost.Sketches2D.CreateLineSegment(pt1, pt2));\n" +
                 "segs.Add(TopSolidHost.Sketches2D.CreateLineSegment(pt2, pt3));\n" +
@@ -325,7 +337,8 @@ namespace TopSolidMcpServer.Tools
                 "segs.Add(TopSolidHost.Sketches2D.CreateLineSegment(pt4, pt1));\n" +
                 "TopSolidHost.Sketches2D.CreateProfile(segs);\n" +
                 "TopSolidHost.Sketches2D.EndModification();\n" +
-                "__message = \"OK: sketch Esquisse_Rectangle created (\" + widthMm + \"x\" + heightMm + \" mm)\";") },
+                "__message = \"OK: sketch \" + sketchName + \" created (\" + widthMm + \"x\" + heightMm + \" mm)\";") },
+
 
             { "extruder_esquisse", RW("GEOMETRY", "Extrudes the last 2D sketch of the active document into a 3D solid. Param: value=height_mm",
                 "double heightMm;\n" +
@@ -3566,6 +3579,374 @@ namespace TopSolidMcpServer.Tools
                 "{\n" +
                 "    __message = \"Error: \" + ex.Message;\n" +
                 "}") },
+
+
+            // =====================================================================
+            // LOCAL RECIPES (Antoine Pinet) — preserved from local build
+            // =====================================================================
+            { "ouvrir_projet", R("PROJECTS", "Opens an existing project by name and makes it the current project. Param: value=project_name",
+                "var projects = TopSolidHost.Pdm.SearchProjectByName(\"{value}\");\n" +
+                "if (projects.Count == 0) return \"Project '{value}' not found.\";\n" +
+                "// SearchProjectByName is a CONTAINS match: keep the exact name match when several projects match\n" +
+                "PdmObjectId projId = projects[0];\n" +
+                "foreach (var p in projects)\n" +
+                "    if (TopSolidHost.Pdm.GetName(p) == \"{value}\") { projId = p; break; }\n" +
+                "TopSolidHost.Pdm.OpenProject(projId);\n" +
+                "PdmObjectId current = TopSolidHost.Pdm.GetCurrentProject();\n" +
+                "if (current.IsEmpty) return \"ERROR: project '\" + TopSolidHost.Pdm.GetName(projId) + \"' could not be opened.\";\n" +
+                "return \"OK: project '\" + TopSolidHost.Pdm.GetName(projId) + \"' is now the current project.\";") },
+
+            { "creer_assemblage", RD("DOCUMENT",
+                "Creates a new assembly document (.TopAsm) from the standard wood model 'Assemblage panneau', " +
+                "resolved BY NAME inside the 'Modèles standards Bois' library (anchored by library id " +
+                "11_58c3c3d4-a85a-429e-b42d-72482c001a63&6_3006, verified by name; a hardcoded template " +
+                "PdmObjectId could pin an obsolete revision, so the last known template id " +
+                "19_r6kr6c34kopuvcbp6sica6cqyy&28524 is only a fallback). " +
+                "Param: value=doc_name or doc_name|project_name (default: current project). " +
+                "Fails if an assembly with the same name already exists in the target project.",
+                "string[] aParts = \"{value}\".Split('|');\n" +
+                "string aDocName = aParts[0].Trim();\n" +
+                "if (aDocName.Length == 0) return \"ERROR: document name cannot be empty\";\n" +
+                "string aProjName = aParts.Length >= 2 ? aParts[1].Trim() : \"\";\n" +
+                "PdmObjectId aProjId = PdmObjectId.Empty;\n" +
+                "if (aProjName.Length > 0)\n" +
+                "{\n" +
+                "    foreach (var p in TopSolidHost.Pdm.GetProjects(true, true))\n" +
+                "    {\n" +
+                "        if (TopSolidHost.Pdm.GetName(p) == aProjName) { aProjId = p; break; }\n" +
+                "    }\n" +
+                "    if (aProjId.IsEmpty) return \"ERROR: project '\" + aProjName + \"' not found\";\n" +
+                "}\n" +
+                "else\n" +
+                "{\n" +
+                "    aProjId = TopSolidHost.Pdm.GetCurrentProject();\n" +
+                "    if (aProjId.IsEmpty) return \"ERROR: no current project\";\n" +
+                "}\n" +
+                "string aProjLabel = TopSolidHost.Pdm.GetName(aProjId);\n" +
+                "// SearchDocumentByName misses freshly created documents (PDM search index\n" +
+                "// lag), so the duplicate check walks the project root with GetConstituents,\n" +
+                "// the same call read_project_contents relies on. The document is created at\n" +
+                "// the project root, so only the root is checked.\n" +
+                "List<PdmObjectId> aSubFolders; List<PdmObjectId> aRootDocs;\n" +
+                "TopSolidHost.Pdm.GetConstituents(aProjId, out aSubFolders, out aRootDocs);\n" +
+                "foreach (var d in aRootDocs)\n" +
+                "{\n" +
+                "    string aExt; TopSolidHost.Pdm.GetType(d, out aExt);\n" +
+                "    if (aExt == \".TopAsm\" && TopSolidHost.Pdm.GetName(d) == aDocName)\n" +
+                "        return \"ERROR: assembly '\" + aDocName + \"' already exists in project '\" + aProjLabel + \"'\";\n" +
+                "}\n" +
+                "// Resolve the template BY NAME inside the standard-models library: a hardcoded\n" +
+                "// template PdmObjectId can pin an obsolete revision (IPdm.GetLatestRevision\n" +
+                "// exists precisely because PDM objects carry revisions). Name resolution always\n" +
+                "// gets the current template; the last known template id is only a fallback.\n" +
+                "PdmObjectId aTemplateId = PdmObjectId.Empty;\n" +
+                "string aTemplateSource = \"\";\n" +
+                "PdmObjectId aModelsProj = PdmObjectId.Empty;\n" +
+                "// The standard-models library is NOT enumerated by GetProjects (it is a\n" +
+                "// SAS-delivered template library, not a working/library project), so try a\n" +
+                "// name search first, then the last known library id, verified by name.\n" +
+                "foreach (var p in TopSolidHost.Pdm.SearchProjectByName(\"Modèles standards Bois\"))\n" +
+                "{\n" +
+                "    if (TopSolidHost.Pdm.GetName(p) == \"Modèles standards Bois\") { aModelsProj = p; break; }\n" +
+                "}\n" +
+                "if (aModelsProj.IsEmpty)\n" +
+                "{\n" +
+                "    try\n" +
+                "    {\n" +
+                "        var aKnownLib = new PdmObjectId(\"11_58c3c3d4-a85a-429e-b42d-72482c001a63&6_3006\");\n" +
+                "        if (!aKnownLib.IsEmpty && TopSolidHost.Pdm.GetName(aKnownLib) == \"Modèles standards Bois\")\n" +
+                "            aModelsProj = aKnownLib;\n" +
+                "    }\n" +
+                "    catch { }\n" +
+                "}\n" +
+                "if (!aModelsProj.IsEmpty)\n" +
+                "{\n" +
+                "    Action<PdmObjectId> aFind = null;\n" +
+                "    aFind = (parentId) =>\n" +
+                "    {\n" +
+                "        List<PdmObjectId> folders; List<PdmObjectId> docs;\n" +
+                "        TopSolidHost.Pdm.GetConstituents(parentId, out folders, out docs);\n" +
+                "        foreach (var d in docs)\n" +
+                "        {\n" +
+                "            string ext; TopSolidHost.Pdm.GetType(d, out ext);\n" +
+                "            if (ext == \".TopAsm\" && TopSolidHost.Pdm.GetName(d) == \"Assemblage panneau\") { aTemplateId = d; return; }\n" +
+                "        }\n" +
+                "        foreach (var f in folders)\n" +
+                "        {\n" +
+                "            if (!aTemplateId.IsEmpty) return;\n" +
+                "            aFind(f);\n" +
+                "        }\n" +
+                "    };\n" +
+                "    aFind(aModelsProj);\n" +
+                "}\n" +
+                "if (!aTemplateId.IsEmpty)\n" +
+                "{\n" +
+                "    aTemplateSource = \"template resolved by name in 'Modèles standards Bois'\";\n" +
+                "}\n" +
+                "else\n" +
+                "{\n" +
+                "    aTemplateId = new PdmObjectId(\"19_r6kr6c34kopuvcbp6sica6cqyy&28524\");\n" +
+                "    aTemplateSource = \"template resolved by legacy PdmObjectId (name lookup failed)\";\n" +
+                "}\n" +
+                "PdmObjectId aNewDoc = PdmObjectId.Empty;\n" +
+                "try\n" +
+                "{\n" +
+                "    aNewDoc = TopSolidHost.Pdm.CreateDocumentWithTemplate(aProjId, aTemplateId);\n" +
+                "}\n" +
+                "catch (Exception aEx)\n" +
+                "{\n" +
+                "    return \"ERROR: could not create assembly from template 'Assemblage panneau' (\" + aTemplateSource + \"): \" + aEx.Message;\n" +
+                "}\n" +
+                "TopSolidHost.Pdm.SetName(aNewDoc, aDocName);\n" +
+                "return \"OK: assembly '\" + aDocName + \"' (.TopAsm) created in project '\" + aProjLabel + \"' from template 'Assemblage panneau' (\" + aTemplateSource + \")\";") },
+
+            // Self-managed (creates a project): RD like creer_assemblage.
+            // CreateProjectWithTemplate manages its own transaction.
+
+            { "creer_projet", RD("PROJECTS",
+                "Creates a new project from the mandatory template 'Modèle AnP', resolved BY NAME via " +
+                "SearchProjectByName (a hardcoded PdmObjectId could pin an obsolete revision, so the last " +
+                "known template id 11_jyersbcmwj7u3nrgeo3bggqzjq&9db is only a fallback). " +
+                "Param: value=project_name. " +
+                "Fails if a project with the same name already exists.",
+                "string aProjName = \"{value}\".Trim();\n" +
+                "if (aProjName.Length == 0) return \"ERROR: project name cannot be empty\";\n" +
+                "// Check for duplicate project name among open projects\n" +
+                "foreach (var p in TopSolidHost.Pdm.GetOpenProjects(true, true))\n" +
+                "{\n" +
+                "    if (TopSolidHost.Pdm.GetName(p) == aProjName)\n" +
+                "        return \"ERROR: project '\" + aProjName + \"' already exists\";\n" +
+                "}\n" +
+                "// Also check via SearchProjectByName (catches closed projects)\n" +
+                "foreach (var p in TopSolidHost.Pdm.SearchProjectByName(aProjName))\n" +
+                "{\n" +
+                "    if (TopSolidHost.Pdm.GetName(p) == aProjName)\n" +
+                "        return \"ERROR: project '\" + aProjName + \"' already exists\";\n" +
+                "}\n" +
+                "// Resolve the template BY NAME: a hardcoded PdmObjectId can pin an obsolete revision.\n" +
+                "PdmObjectId aTemplateId = PdmObjectId.Empty;\n" +
+                "string aTemplateSource = \"\";\n" +
+                "foreach (var p in TopSolidHost.Pdm.SearchProjectByName(\"Modèle AnP\"))\n" +
+                "{\n" +
+                "    if (TopSolidHost.Pdm.GetName(p) == \"Modèle AnP\") { aTemplateId = p; break; }\n" +
+                "}\n" +
+                "if (!aTemplateId.IsEmpty)\n" +
+                "{\n" +
+                "    aTemplateSource = \"template resolved by name\";\n" +
+                "}\n" +
+                "else\n" +
+                "{\n" +
+                "    // Fallback: last known template id, verified by name\n" +
+                "    try\n" +
+                "    {\n" +
+                "        var aKnown = new PdmObjectId(\"11_jyersbcmwj7u3nrgeo3bggqzjq&9db\");\n" +
+                "        if (!aKnown.IsEmpty && TopSolidHost.Pdm.GetName(aKnown) == \"Modèle AnP\")\n" +
+                "        {\n" +
+                "            aTemplateId = aKnown;\n" +
+                "            aTemplateSource = \"template resolved by legacy PdmObjectId (name lookup failed)\";\n" +
+                "        }\n" +
+                "    }\n" +
+                "    catch { }\n" +
+                "}\n" +
+                "if (aTemplateId.IsEmpty)\n" +
+                "    return \"ERROR: template 'Modèle AnP' not found (searched by name and by known id)\";\n" +
+                "// Create the project from the template\n" +
+                "PdmObjectId aNewProj = PdmObjectId.Empty;\n" +
+                "try\n" +
+                "{\n" +
+                "    aNewProj = TopSolidHost.Pdm.CreateProjectWithTemplate(aProjName, aTemplateId);\n" +
+                "}\n" +
+                "catch (Exception aEx)\n" +
+                "{\n" +
+                "    return \"ERROR: could not create project from template 'Modèle AnP' (\" + aTemplateSource + \"): \" + aEx.Message;\n" +
+                "}\n" +
+                "if (aNewProj.IsEmpty)\n" +
+                "    return \"ERROR: CreateProjectWithTemplate returned an empty id\";\n" +
+                "return \"OK: project '\" + aProjName + \"' created from template 'Modèle AnP' (\" + aTemplateSource + \")\";") },
+
+
+            { "texture_creation_from_image", RD("TEXTURES",
+                "Creates (or updates) a texture document (.TopTex) from an image file, in a PDM folder of the current project. " +
+                "The document is named after the image file. Param: value=image_path|folder_name|width_mm " +
+                "(e.g. C:/photos/oak.jpg|Textures|2800). width_mm is the texture scale in metres in the API " +
+                "(2800 mm = 2.8 m). If a texture with the same name already exists in the folder, it is updated (idempotent).",
+                "string[] tParts = \"{value}\".Split('|');\n" +
+                "if (tParts.Length < 2) return \"ERROR: expected format image_path|folder_name|width_mm (e.g. C:/photos/oak.jpg|Textures|2800)\";\n" +
+                "string imgPath = tParts[0].Trim();\n" +
+                "string tFolderName = tParts[1].Trim();\n" +
+                "double widthMm = 2800;\n" +
+                "if (tParts.Length >= 3 && !double.TryParse(tParts[2].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out widthMm))\n" +
+                "    return \"ERROR: invalid width_mm '\" + tParts[2].Trim() + \"'\";\n" +
+                "if (widthMm <= 0) return \"ERROR: width_mm must be positive\";\n" +
+                "if (!System.IO.File.Exists(imgPath)) return \"ERROR: image not found: \" + imgPath;\n" +
+                "PdmObjectId tProjId = TopSolidHost.Pdm.GetCurrentProject();\n" +
+                "if (tProjId.IsEmpty) return \"ERROR: no current project\";\n" +
+                "PdmObjectId tFolderId = PdmObjectId.Empty;\n" +
+                "var tFolders = TopSolidHost.Pdm.SearchFolderByName(tProjId, tFolderName);\n" +
+                "foreach (var f in tFolders) { if (TopSolidHost.Pdm.GetName(f) == tFolderName) { tFolderId = f; break; } }\n" +
+                "if (tFolderId.IsEmpty) tFolderId = TopSolidHost.Pdm.CreateFolder(tProjId, tFolderName);\n" +
+                "string tBaseName = System.IO.Path.GetFileNameWithoutExtension(imgPath);\n" +
+                "PdmObjectId tDocPdm = PdmObjectId.Empty;\n" +
+                "List<PdmObjectId> tSubFolders; List<PdmObjectId> tDocs;\n" +
+                "TopSolidHost.Pdm.GetConstituents(tFolderId, out tSubFolders, out tDocs);\n" +
+                "bool tExisted = false;\n" +
+                "foreach (var d in tDocs) { if (TopSolidHost.Pdm.GetName(d) == tBaseName) { tDocPdm = d; tExisted = true; break; } }\n" +
+                "if (tDocPdm.IsEmpty)\n" +
+                "{\n" +
+                "    tDocPdm = TopSolidHost.Pdm.CreateDocument(tFolderId, \".TopTex\", true);\n" +
+                "    TopSolidHost.Pdm.SetName(tDocPdm, tBaseName);\n" +
+                "}\n" +
+                "DocumentId tDocId = TopSolidHost.Documents.GetDocument(tDocPdm);\n" +
+                "TopSolidHost.Documents.Open(ref tDocId);\n" +
+                "bool tCommitted = false;\n" +
+                "if (!TopSolidHost.Application.StartModification(\"Texture \" + tBaseName, false))\n" +
+                "{\n" +
+                "    TopSolidHost.Documents.Close(tDocId, false, false);\n" +
+                "    return \"ERROR: could not start modification\";\n" +
+                "}\n" +
+                "// A reused document is clean after a previous Save+Close: it must be made dirty\n" +
+                "// (checked out) before it can be modified. Must run INSIDE the modification\n" +
+                "// transaction, and docId may be refreshed by the call.\n" +
+                "TopSolidHost.Documents.EnsureIsDirty(ref tDocId);\n" +
+                "string tError = null;\n" +
+                "try\n" +
+                "{\n" +
+                "    TopSolidHost.Textures.SetPicture(tDocId, imgPath);\n" +
+                "    TopSolidHost.Textures.SetTextureScale(tDocId, widthMm * 0.001);\n" +
+                "    TopSolidHost.Application.EndModification(true, true);\n" +
+                "    tCommitted = true;\n" +
+                "}\n" +
+                "catch (Exception tEx)\n" +
+                "{\n" +
+                "    tError = tEx.Message;\n" +
+                "}\n" +
+                "finally\n" +
+                "{\n" +
+                "    if (!tCommitted) TopSolidHost.Application.EndModification(false, false);\n" +
+                "}\n" +
+                "if (tError != null)\n" +
+                "{\n" +
+                "    TopSolidHost.Documents.Close(tDocId, false, false);\n" +
+                "    return \"ERROR: \" + tError;\n" +
+                "}\n" +
+                "TopSolidHost.Documents.Save(tDocId);\n" +
+                "TopSolidHost.Documents.Close(tDocId, false, true);\n" +
+                "return \"OK: texture '\" + tBaseName + \"' \" + (tExisted ? \"updated\" : \"created\") + \" in folder '\" + tFolderName + \"' (width \" + widthMm + \" mm)\";") },
+
+            // Self-managed transaction (creates a document): RD like
+            // texture_creation_from_image, not RW (the Pattern D wrapper requires an
+            // active document and would nest StartModification).
+
+            { "coating_creation_from_texture", RD("TEXTURES",
+                "Creates (or updates) a coating document (.TopCoa) from a texture document (.TopTex) of the current project, " +
+                "named after the texture, with the texture set as the coating albedo texture. The target folder is created " +
+                "if absent. Idempotent: an existing coating with the same name is updated. " +
+                "Param: value=texture_name|source_folder|target_folder (e.g. oak|Textures|Coatings)",
+                "string[] cParts = \"{value}\".Split('|');\n" +
+                "if (cParts.Length != 3) return \"ERROR: expected format texture_name|source_folder|target_folder (e.g. oak|Textures|Coatings)\";\n" +
+                "string cTexName = cParts[0].Trim();\n" +
+                "string cSrcName = cParts[1].Trim();\n" +
+                "string cDstName = cParts[2].Trim();\n" +
+                "if (cTexName.Length == 0 || cSrcName.Length == 0 || cDstName.Length == 0) return \"ERROR: texture name and folder names cannot be empty\";\n" +
+                "PdmObjectId cProjId = TopSolidHost.Pdm.GetCurrentProject();\n" +
+                "if (cProjId.IsEmpty) return \"ERROR: no current project\";\n" +
+                "PdmObjectId cSrcFolder = PdmObjectId.Empty;\n" +
+                "foreach (var f in TopSolidHost.Pdm.SearchFolderByName(cProjId, cSrcName))\n" +
+                "{\n" +
+                "    if (TopSolidHost.Pdm.GetName(f) == cSrcName) { cSrcFolder = f; break; }\n" +
+                "}\n" +
+                "if (cSrcFolder.IsEmpty) return \"ERROR: folder '\" + cSrcName + \"' not found\";\n" +
+                "PdmObjectId cTexPdm = PdmObjectId.Empty;\n" +
+                "List<PdmObjectId> cSubF; List<PdmObjectId> cSrcDocs;\n" +
+                "TopSolidHost.Pdm.GetConstituents(cSrcFolder, out cSubF, out cSrcDocs);\n" +
+                "foreach (var d in cSrcDocs)\n" +
+                "{\n" +
+                "    string cExt; TopSolidHost.Pdm.GetType(d, out cExt);\n" +
+                "    if (cExt == \".TopTex\" && TopSolidHost.Pdm.GetName(d) == cTexName) { cTexPdm = d; break; }\n" +
+                "}\n" +
+                "if (cTexPdm.IsEmpty) return \"ERROR: texture '\" + cTexName + \"' (.TopTex) not found in folder '\" + cSrcName + \"'\";\n" +
+                "PdmObjectId cDstFolder = PdmObjectId.Empty;\n" +
+                "foreach (var f in TopSolidHost.Pdm.SearchFolderByName(cProjId, cDstName))\n" +
+                "{\n" +
+                "    if (TopSolidHost.Pdm.GetName(f) == cDstName) { cDstFolder = f; break; }\n" +
+                "}\n" +
+                "if (cDstFolder.IsEmpty) cDstFolder = TopSolidHost.Pdm.CreateFolder(cProjId, cDstName);\n" +
+                "PdmObjectId cCotPdm = PdmObjectId.Empty;\n" +
+                "List<PdmObjectId> cDstSubF; List<PdmObjectId> cDstDocs;\n" +
+                "TopSolidHost.Pdm.GetConstituents(cDstFolder, out cDstSubF, out cDstDocs);\n" +
+                "bool cExisted = false;\n" +
+                "foreach (var d in cDstDocs)\n" +
+                "{\n" +
+                "    string cExt; TopSolidHost.Pdm.GetType(d, out cExt);\n" +
+                "    if (cExt == \".TopCoa\" && TopSolidHost.Pdm.GetName(d) == cTexName) { cCotPdm = d; cExisted = true; break; }\n" +
+                "}\n" +
+                "if (cCotPdm.IsEmpty)\n" +
+                "{\n" +
+                "    cCotPdm = TopSolidHost.Pdm.CreateDocument(cDstFolder, \".TopCoa\", true);\n" +
+                "    TopSolidHost.Pdm.SetName(cCotPdm, cTexName);\n" +
+                "}\n" +
+                "DocumentId cCotDoc = TopSolidHost.Documents.GetDocument(cCotPdm);\n" +
+                "TopSolidHost.Documents.Open(ref cCotDoc);\n" +
+                "DocumentId cTexDoc = TopSolidHost.Documents.GetDocument(cTexPdm);\n" +
+                "bool cCommitted = false;\n" +
+                "if (!TopSolidHost.Application.StartModification(\"Coating \" + cTexName, false))\n" +
+                "{\n" +
+                "    TopSolidHost.Documents.Close(cCotDoc, false, false);\n" +
+                "    return \"ERROR: could not start modification\";\n" +
+                "}\n" +
+                "// A reused document is clean after a previous Save+Close: it must be made dirty\n" +
+                "// (checked out) before it can be modified. Must run INSIDE the modification.\n" +
+                "TopSolidHost.Documents.EnsureIsDirty(ref cCotDoc);\n" +
+                "string cError = null;\n" +
+                "try\n" +
+                "{\n" +
+                "    TopSolidDesignHost.Coatings.SetAlbedoTextureDocument(cCotDoc, cTexDoc);\n" +
+                "    TopSolidHost.Application.EndModification(true, true);\n" +
+                "    cCommitted = true;\n" +
+                "}\n" +
+                "catch (Exception cEx)\n" +
+                "{\n" +
+                "    cError = cEx.Message;\n" +
+                "}\n" +
+                "finally\n" +
+                "{\n" +
+                "    if (!cCommitted) TopSolidHost.Application.EndModification(false, false);\n" +
+                "}\n" +
+                "if (cError != null)\n" +
+                "{\n" +
+                "    TopSolidHost.Documents.Close(cCotDoc, false, false);\n" +
+                "    return \"ERROR: \" + cError;\n" +
+                "}\n" +
+                "TopSolidHost.Documents.Save(cCotDoc);\n" +
+                "TopSolidHost.Documents.Close(cCotDoc, false, true);\n" +
+                "return \"OK: coating '\" + cTexName + \"' \" + (cExisted ? \"updated\" : \"created\") + \" in folder '\" + cDstName + \"' (albedo = texture '\" + cTexName + \"' from '\" + cSrcName + \"')\";") },
+
+
+            { "list_licenses", R("LICENSES", "Lists all TopSolid licenses (name, type, version, status, expiration)",
+                "var licenses = TopSolidHost.Licenses;\n" +
+                "var allLicenses = licenses.GetLicenses();\n" +
+                "var activeLicenses = licenses.GetActveLicenses();\n" +
+                "var floatingServers = licenses.GetFloatingLicenseServers();\n" +
+                "var sb = new System.Text.StringBuilder();\n" +
+                "sb.AppendLine(\"Floating license servers: \" + (string.IsNullOrEmpty(floatingServers) ? \"(none)\" : floatingServers));\n" +
+                "sb.AppendLine(\"Total licenses: \" + allLicenses.Count);\n" +
+                "sb.AppendLine(\"Active licenses: \" + activeLicenses.Count);\n" +
+                "sb.AppendLine();\n" +
+                "foreach (var lic in allLicenses)\n" +
+                "{\n" +
+                "    sb.AppendLine(\"--- \" + lic.Name + \" ---\");\n" +
+                "    sb.AppendLine(\"  Type: \" + lic.LicenseType);\n" +
+                "    sb.AppendLine(\"  Provider: \" + lic.Provider);\n" +
+                "    sb.AppendLine(\"  Version: \" + lic.Version);\n" +
+                "    sb.AppendLine(\"  Status: \" + lic.Status);\n" +
+                "    sb.AppendLine(\"  Expiration: \" + lic.ExpirationDate);\n" +
+                "    sb.AppendLine(\"  LicensedTo: \" + lic.LicensedTo);\n" +
+                "    sb.AppendLine(\"  IsActive: \" + lic.IsActive);\n" +
+                "    sb.AppendLine(\"  Group: \" + lic.Group);\n" +
+                "    sb.AppendLine();\n" +
+                "}\n" +
+                "return sb.ToString();") },
+
 
         };
 
